@@ -1,0 +1,117 @@
+services:
+  tg-bot:
+    build:
+      context: tg_bot
+      dockerfile: Dockerfile
+    env_file:
+      - ./.env
+    environment:
+      - TZ=Europe/Moscow
+    container_name: rubicon_tg_bot
+    restart: always
+    depends_on:
+      - database
+      - redis
+    volumes:
+      - videos:/usr/src/app/files
+      - ./video_files:/usr/src/app/files
+    networks:
+      - app_network
+
+  webserver:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: rubicon-gateway
+    restart: always
+    environment:
+      - TZ=Europe/Moscow
+    volumes:
+      - static_volume:/code/static:rw
+    ports:
+      - "80:80" # Локальный доступ
+    depends_on:
+      - api
+    networks:
+      - app_network
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: rubicon-api
+    restart: always
+    volumes:
+      - ./rubicon_admin:/code:rw
+      - static_volume:/code/static:rw
+      - videos:/code/static/video
+      - ./video_files:/code/static/video
+    env_file:
+      - ./.env
+    environment:
+      - TZ=Europe/Moscow
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - app_network
+
+  database:
+    image: postgres:17-alpine
+    container_name: rubicon-db
+    restart: always
+    volumes:
+      - content_db:/var/lib/postgresql/data/
+      # - ./database_dump.sql:/docker-entrypoint-initdb.d/init.sql  # Раскомментируйте, если есть дамп БД
+    env_file:
+      - ./.env
+    environment:
+      - TZ=Europe/Moscow
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "sh -c 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}'",
+        ]
+      interval: 15s
+      timeout: 30s
+      retries: 3
+    networks:
+      - app_network
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: redis
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Moscow
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./.redis_data:/data
+    restart: unless-stopped
+    command: [ "redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}" ]
+    healthcheck:
+      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "PING" ]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+        compress: "true"
+    networks:
+      - app_network
+
+volumes:
+  content_db:
+  static_volume:
+  videos:
+
+networks:
+  app_network:
+    name: app_network

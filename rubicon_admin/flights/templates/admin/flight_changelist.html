@@ -1,0 +1,21 @@
+<!-- templates/admin/flights/flight_changelist.html -->
+{% extends "admin/change_list.html" %}
+{% load i18n admin_urls static admin_list %}
+
+<!-- Альтернативно, можно добавить форму прямо на странице -->
+{% block content %}
+{{ block.super }}
+<!-- Добавляем форму загрузки файла под основным контентом -->
+<div style="margin-top: 20px; padding: 10px; border: 1px solid #ccc;">
+    <h3>{% trans 'Импорт данных из Excel' %}</h3>
+    {# --- Используем правильное имя URL --- #}
+    <form method="post" action="{% url 'admin:flights_flight_import_xlsx' %}" enctype="multipart/form-data">
+        {% csrf_token %}
+        <label for="xlsx_files">Выберите .xlsx или .xlsm файл(ы):</label>
+        <!-- ВАЖНО: name="xlsx_files" и multiple -->
+        <input type="file" name="xlsx_files" id="xlsx_files" accept=".xlsx,.xlsm" required multiple>
+        <input type="submit" value="Импортировать">
+    </form>
+    <p><small>{% trans 'Файл должен содержать данные о вылетах на листе "SVODNAYA" (или втором листе), начиная со строки с заголовками (например, "Время", "Номер вылета" и т.д.). Время до 06:30 будет отнесено к следующему дню. Поддерживаются файлы с макросами (.xlsm).' %}</small></p>
+</div>
+{% endblock %}
