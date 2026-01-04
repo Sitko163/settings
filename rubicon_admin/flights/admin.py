@@ -129,11 +129,27 @@ class UserAdmin(BaseUserAdmin):
 class ExplosiveDeviceAdmin(admin.ModelAdmin):
     search_fields = ('name',)
     ordering = ('name',)
+    actions = ['delete_all']
+    
+    def delete_all(self, request, queryset):
+        """Удалить все записи"""
+        count = ExplosiveDevice.objects.count()
+        ExplosiveDevice.objects.all().delete()
+        self.message_user(request, f'Удалено записей: {count}', level='success')
+    delete_all.short_description = "Удалить все записи"
 
 @admin.register(ExplosiveType)
 class ExplosiveTypeAdmin(admin.ModelAdmin):
     search_fields = ('name',)
     ordering = ('name',)
+    actions = ['delete_all']
+    
+    def delete_all(self, request, queryset):
+        """Удалить все записи"""
+        count = ExplosiveType.objects.count()
+        ExplosiveType.objects.all().delete()
+        self.message_user(request, f'Удалено записей: {count}', level='success')
+    delete_all.short_description = "Удалить все записи"
 
 @admin.register(ImportProgress)
 class ImportProgressAdmin(admin.ModelAdmin):
@@ -154,6 +170,14 @@ class DroneAdmin(admin.ModelAdmin):
     search_fields = ('name', 'drone_type')
     list_display = ('name', 'drone_type')
     ordering = ('name',)
+    actions = ['delete_all']
+    
+    def delete_all(self, request, queryset):
+        """Удалить все записи"""
+        count = Drone.objects.count()
+        Drone.objects.all().delete()
+        self.message_user(request, f'Удалено записей: {count}', level='success')
+    delete_all.short_description = "Удалить все записи"
 
 @admin.register(TargetType)
 class TargetTypeAdmin(admin.ModelAdmin):
@@ -192,7 +216,14 @@ class PilotAdmin(admin.ModelAdmin):
     )
     ordering = ('callname',)
     readonly_fields = ('id', 'created', 'modified')
-    actions = [send_telegram_broadcast]
+    actions = [send_telegram_broadcast, 'delete_all']
+    
+    def delete_all(self, request, queryset):
+        """Удалить все записи"""
+        count = Pilot.objects.count()
+        Pilot.objects.all().delete()
+        self.message_user(request, f'Удалено записей: {count}', level='success')
+    delete_all.short_description = "Удалить все записи"
 
     def get_urls(self):
         urls = super().get_urls()
@@ -398,6 +429,7 @@ class FlightAdmin(admin.ModelAdmin):
     actions = ['mark_as_destroyed',
                'mark_as_defeated',
                'mark_as_not_defeated',
+               'delete_all',
                'recalculate_coordinates',
                'precalculate_coordinates',
                'clear_coordinate_cache',
@@ -419,6 +451,10 @@ class FlightAdmin(admin.ModelAdmin):
                 'import-xlsx/',
                 self.admin_site.admin_view(self.import_xlsx_view),
                 name='flights_flight_import_xlsx'),
+            path(
+                'clear-database/',
+                self.admin_site.admin_view(self.clear_database_view),
+                name='flights_flight_clear_database'),
 
         ]
         return custom_urls + urls
@@ -477,6 +513,13 @@ class FlightAdmin(admin.ModelAdmin):
         updated_count = queryset.update(result=FlightResultTypes.NOT_DEFEATED)
         self.message_user(request, f"{updated_count} полетов отмечены как 'Не поражен'.")
     mark_as_not_defeated.short_description = "❌ Отметить выбранные как 'Не поражен'"
+    
+    def delete_all(self, request, queryset):
+        """Удалить все записи"""
+        count = Flight.objects.count()
+        Flight.objects.all().delete()
+        self.message_user(request, f'Удалено записей: {count}', level='success')
+    delete_all.short_description = "🗑️ Удалить все записи"
 
     def recalculate_coordinates(self, request, queryset):
         updated_count = 0
@@ -1748,7 +1791,7 @@ class FlightAdmin(admin.ModelAdmin):
                             flight_defaults = flight_defaults_clean
                             
                             # Проверяем, существует ли уже такой полет
-                            # Ключ для проверки дубликата: (number, pilot_id, flight_date, flight_time)
+                            # Сначала проверяем по ключевым полям (быстрая проверка)
                             flight_key = (
                                 flight_number,
                                 pilot.id if pilot else None,
@@ -1756,11 +1799,41 @@ class FlightAdmin(admin.ModelAdmin):
                                 flight_defaults.get('flight_time')
                             )
                             
-                            # Пропускаем, если полет уже существует
+                            # Пропускаем, если полет уже существует в текущем импорте
                             if flight_key in existing_flights_set:
                                 skipped_duplicates += 1
                                 if skipped_duplicates <= 10:  # Логируем только первые 10
-                                    logger.debug(f"Пропущен дубликат полета: номер={flight_number}, пилот={pilot.callname if pilot else None}, дата={flight_defaults.get('flight_date')}, время={flight_defaults.get('flight_time')}")
+                                    logger.debug(f"Пропущен дубликат полета в текущем импорте: номер={flight_number}, пилот={pilot.callname if pilot else None}, дата={flight_defaults.get('flight_date')}, время={flight_defaults.get('flight_time')}")
+                                continue
+                            
+                            # Строгая проверка на полностью одинаковые записи (все поля)
+                            # Проверяем в базе данных на полностью одинаковые записи только если не найден в текущем импорте
+                            # Это оптимизация - избегаем лишних запросов к БД
+                            existing_duplicate = None
+                            try:
+                                existing_duplicate = Flight.objects.filter(
+                                    number=flight_number,
+                                    pilot=pilot,
+                                    flight_date=flight_defaults.get('flight_date'),
+                                    flight_time=flight_defaults.get('flight_time'),
+                                    target=flight_defaults.get('target'),
+                                    drone=flight_defaults.get('drone'),
+                                    result=flight_defaults.get('result'),
+                                    coordinates=flight_defaults.get('coordinates'),
+                                    distance=flight_defaults.get('distance'),
+                                    explosive_type=flight_defaults.get('explosive_type'),
+                                    explosive_device=flight_defaults.get('explosive_device'),
+                                    corrective=flight_defaults.get('corrective'),
+                                    objective=flight_defaults.get('objective'),
+                                    comment=flight_defaults.get('comment'),
+                                ).first()
+                            except Exception as dup_check_error:
+                                logger.warning(f"Ошибка при проверке дубликата для строки {row_idx}: {dup_check_error}")
+                            
+                            if existing_duplicate:
+                                skipped_duplicates += 1
+                                if skipped_duplicates <= 10:  # Логируем только первые 10
+                                    logger.debug(f"Пропущен полностью идентичный дубликат полета: номер={flight_number}, пилот={pilot.callname if pilot else None}, дата={flight_defaults.get('flight_date')}, время={flight_defaults.get('flight_time')}")
                                 continue
                             
                             # Создаем новый полет
@@ -2337,4 +2410,71 @@ class FlightAdmin(admin.ModelAdmin):
             title=_("Импорт вылетов из XLSX"),
         )
         return render(request, "admin/import_xlsx.html", context)
+    
+    def clear_database_view(self, request):
+        """Очистка всех данных, загруженных из Excel"""
+        if request.method == 'POST':
+            from django.db import transaction
+            try:
+                with transaction.atomic():
+                    # Подсчитываем количество записей перед удалением
+                    flights_count = Flight.objects.count()
+                    pilots_count = Pilot.objects.count()
+                    drones_count = Drone.objects.count()
+                    explosive_types_count = ExplosiveType.objects.count()
+                    explosive_devices_count = ExplosiveDevice.objects.count()
+                    target_types_count = TargetType.objects.count()
+                    corrective_types_count = CorrectiveType.objects.count()
+                    direction_types_count = DirectionType.objects.count()
+                    import_progress_count = ImportProgress.objects.count()
+                    
+                    # Удаляем все данные
+                    Flight.objects.all().delete()
+                    Pilot.objects.all().delete()
+                    Drone.objects.all().delete()
+                    ExplosiveType.objects.all().delete()
+                    ExplosiveDevice.objects.all().delete()
+                    TargetType.objects.all().delete()
+                    CorrectiveType.objects.all().delete()
+                    DirectionType.objects.all().delete()
+                    ImportProgress.objects.all().delete()
+                    
+                    self.message_user(
+                        request,
+                        _(f"✅ База данных очищена! Удалено:\n"
+                          f"• Вылеты: {flights_count}\n"
+                          f"• Пилоты: {pilots_count}\n"
+                          f"• Дроны: {drones_count}\n"
+                          f"• Виды БП: {explosive_types_count}\n"
+                          f"• Виды взрывателя: {explosive_devices_count}\n"
+                          f"• Типы целей: {target_types_count}\n"
+                          f"• Типы корректировок: {corrective_types_count}\n"
+                          f"• Типы направлений: {direction_types_count}\n"
+                          f"• Прогресс импорта: {import_progress_count}"),
+                        level=messages.SUCCESS
+                    )
+                    logger.info(f"База данных очищена пользователем {request.user.username}")
+            except Exception as e:
+                logger.error(f"Ошибка при очистке базы данных: {e}", exc_info=True)
+                self.message_user(
+                    request,
+                    _(f"❌ Ошибка при очистке базы данных: {str(e)}"),
+                    level=messages.ERROR
+                )
+            
+            return HttpResponseRedirect("../")
+        
+        # GET запрос - показываем страницу подтверждения
+        context = {
+            **self.admin_site.each_context(request),
+            'title': _('Очистка базы данных'),
+            'opts': self.model._meta,
+            'has_view_permission': self.has_view_permission(request),
+            'flights_count': Flight.objects.count(),
+            'pilots_count': Pilot.objects.count(),
+            'drones_count': Drone.objects.count(),
+            'explosive_types_count': ExplosiveType.objects.count(),
+            'explosive_devices_count': ExplosiveDevice.objects.count(),
+        }
+        return render(request, "admin/clear_database.html", context)
 

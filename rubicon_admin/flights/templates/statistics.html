@@ -878,6 +878,18 @@
     </div>
     <script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU&apikey=5f9b1e6a-a8d8-42e1-8d00-9562515bb9a0&modules=Heatmap"></script>
     <script>
+        // Вспомогательная функция для экранирования HTML
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.toString().replace(/[&<>"']/g, function(m) { return map[m]; });
+        }
+        
         // Глобальные переменные для чартов
         let dailyTrendChart = null;
         let pilotsChart = null;
