@@ -1,5 +1,6 @@
 import datetime
 import logging
+import re
 
 from asgiref.sync import async_to_sync
 from config import settings
@@ -1025,6 +1026,11 @@ class FlightAdmin(admin.ModelAdmin):
                     # Предзагружаем справочники в память для быстрого доступа
                     self.message_user(request, _("Предзагрузка справочников..."), level=messages.INFO)
                     
+                    # Вспомогательная функция для сравнения дронов (определяем один раз в начале)
+                    def get_drone_comparison_key(drone_name):
+                        """Возвращает ключ для сравнения дронов (без дефисов)"""
+                        return re.sub(r'[-]', '', str(drone_name).lower().strip())
+                    
                     # Кэш пилотов по позывному
                     pilots_cache = {pilot.callname.lower(): pilot for pilot in Pilot.objects.all()}
                     
@@ -1033,9 +1039,6 @@ class FlightAdmin(admin.ModelAdmin):
                     
                     # Кэш типов дронов
                     # Создаем кэш дронов с ключом без дефисов для группировки X-51 и X51
-                    def get_drone_comparison_key(drone_name):
-                        """Возвращает ключ для сравнения дронов (без дефисов)"""
-                        return re.sub(r'[-]', '', str(drone_name).lower().strip())
                     drones_cache = {get_drone_comparison_key(drone.name): drone for drone in Drone.objects.all()}
                     
                     # Кэш видов БП
@@ -1063,8 +1066,6 @@ class FlightAdmin(admin.ModelAdmin):
                     # Кэш дубликатов больше не используется - база очищена, все записи новые
                     
                     # Функции нормализации для целей и дронов (чтобы избежать дублирования)
-                    import re
-                    
                     def normalize_target_name(target_name):
                         """Нормализует название цели для объединения дубликатов"""
                         if not target_name:
@@ -1425,7 +1426,6 @@ class FlightAdmin(admin.ModelAdmin):
                                         # Пробуем извлечь число из строки
                                         flight_number_str = str(flight_number_raw).strip()
                                         # Убираем все нецифровые символы, кроме минуса в начале
-                                        import re
                                         numbers = re.findall(r'-?\d+', flight_number_str)
                                         if numbers:
                                             flight_number = int(float(numbers[0]))
@@ -1653,10 +1653,6 @@ class FlightAdmin(admin.ModelAdmin):
                             # Добавляем в список для создания, если нужно (создадим батчем позже)
                             if drone:
                                 # Создаем ключ для сравнения без дефисов (чтобы X-51 и X51 группировались)
-                                def get_drone_comparison_key(drone_name):
-                                    """Возвращает ключ для сравнения дронов (без дефисов)"""
-                                    return re.sub(r'[-]', '', drone_name.lower().strip())
-                                
                                 drone_key = get_drone_comparison_key(drone)
                                 
                                 # Проверяем в кэше по ключу без дефисов
@@ -1874,9 +1870,6 @@ class FlightAdmin(admin.ModelAdmin):
                                             Drone.objects.bulk_create(new_drones.values(), ignore_conflicts=True)
                                             # Перезагружаем кэш из базы для получения актуальных нормализованных значений
                                             # Создаем кэш дронов с ключом без дефисов для группировки X-51 и X51
-                                            def get_drone_comparison_key(drone_name):
-                                                """Возвращает ключ для сравнения дронов (без дефисов)"""
-                                                return re.sub(r'[-]', '', str(drone_name).lower().strip())
                                             drones_cache = {get_drone_comparison_key(drone.name): drone for drone in Drone.objects.all()}
                                             new_drones.clear()
                                         
@@ -2069,9 +2062,6 @@ class FlightAdmin(admin.ModelAdmin):
                         Drone.objects.bulk_create(new_drones.values(), ignore_conflicts=True)
                         # Перезагружаем кэш из базы для получения актуальных нормализованных значений
                         # Создаем кэш дронов с ключом без дефисов для группировки X-51 и X51
-                        def get_drone_comparison_key(drone_name):
-                            """Возвращает ключ для сравнения дронов (без дефисов)"""
-                            return re.sub(r'[-]', '', str(drone_name).lower().strip())
                         drones_cache = {get_drone_comparison_key(drone.name): drone for drone in Drone.objects.all()}
                         new_drones.clear()
                     
@@ -2100,9 +2090,6 @@ class FlightAdmin(admin.ModelAdmin):
                                     Drone.objects.bulk_create(new_drones.values(), ignore_conflicts=True)
                                     # Перезагружаем кэш из базы для получения актуальных нормализованных значений
                                     # Создаем кэш дронов с ключом без дефисов для группировки X-51 и X51
-                                    def get_drone_comparison_key(drone_name):
-                                        """Возвращает ключ для сравнения дронов (без дефисов)"""
-                                        return re.sub(r'[-]', '', str(drone_name).lower().strip())
                                     drones_cache = {get_drone_comparison_key(drone.name): drone for drone in Drone.objects.all()}
                                     new_drones.clear()
                                 

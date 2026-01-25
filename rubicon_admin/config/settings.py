@@ -21,6 +21,7 @@ TOKEN = os.getenv('TOKEN', 'token')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', False) == 'True'
 
+# CSRF настройки
 CSRF_COOKIE_SECURE = True
 CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', 'https://himchistkacovrov.ru,https://aeroflot-pvz.ru,https://www.aeroflot-pvz.ru').split(',')
 

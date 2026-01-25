@@ -87,21 +87,27 @@ class PilotRatingView(APIView):
                         "details": {
                             "week": {
                                 "destroys": week_data["K"],
+                                "defeated": week_data.get("L", 0),
                                 "flights_count": week_data["N"],
                                 "total_weight": week_data["W_total"],
-                                "accuracy": round(week_data["A"], 2) if week_data["A"] is not None else 0.0
+                                "accuracy": round(week_data["A"], 2) if week_data["A"] is not None else 0.0,
+                                "success_rate": week_data.get("success_rate", 0.0)
                             },
                             "month": {
                                 "destroys": month_data["K"],
+                                "defeated": month_data.get("L", 0),
                                 "flights_count": month_data["N"],
                                 "total_weight": month_data["W_total"],
-                                "accuracy": round(month_data["A"], 2) if month_data["A"] is not None else 0.0
+                                "accuracy": round(month_data["A"], 2) if month_data["A"] is not None else 0.0,
+                                "success_rate": month_data.get("success_rate", 0.0)
                             },
                             "total": {
                                 "destroys": total_data["K"],
+                                "defeated": total_data.get("L", 0),
                                 "flights_count": total_data["N"],
                                 "total_weight": total_data["W_total"],
-                                "accuracy": round(total_data["A"], 2) if total_data["A"] is not None else 0.0
+                                "accuracy": round(total_data["A"], 2) if total_data["A"] is not None else 0.0,
+                                "success_rate": total_data.get("success_rate", 0.0)
                             }
                         }
                     })
@@ -131,6 +137,11 @@ class PilotRatingView(APIView):
             return Response({'error': f'Internal server error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def calculate_rating_details_new(self, flights):
+        K = 0
+        L = 0
+        N = 0
+        A = 0
+        success_rate = 0
         try:
             destroyed_flights = flights.filter(result=FlightResultTypes.DESTROYED)
             defeated_flights = flights.filter(result=FlightResultTypes.DEFEATED)
@@ -140,14 +151,17 @@ class PilotRatingView(APIView):
             N = flights.count()  # Общее количество вылетов
 
             A = (K + L) / N if N > 0 else 0
+            success_rate = (K + L) / N * 100 if N > 0 else 0  # Процент успеха
         except Exception as e:
             logger.error(f"Ошибка при подсчете статистики полетов: {e}", exc_info=True)
             return {
                 "rating": 0.0,
                 "K": 0,
+                "L": 0,
                 "W_total": 0,
                 "N": 0,
-                "A": 0
+                "A": 0,
+                "success_rate": 0
             }
 
         W_total = 0
@@ -219,7 +233,9 @@ class PilotRatingView(APIView):
         return {
             "rating": round(R, 2),
             "K": K,
+            "L": L,
             "W_total": W_total,
             "N": N,
-            "A": A
+            "A": A,
+            "success_rate": round(success_rate, 1)
         }

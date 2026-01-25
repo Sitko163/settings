@@ -58,19 +58,30 @@ class ScheduleAPIView(APIView):
             kt_pilots = []
             st_pilots = []
 
-            # Если применен фильтр по пилоту, используем только отфильтрованных пилотов
+            # Получаем только пилотов, у которых есть полеты в выбранном периоде
+            # Сначала получаем уникальных пилотов из отфильтрованных полетов
+            pilots_with_flights = flights.exclude(
+                pilot__callname__istartswith='Неизвестный_'
+            ).exclude(
+                pilot__isnull=True
+            ).values_list('pilot__id', 'pilot__callname').distinct()
+            
+            # Если применен фильтр по пилоту, дополнительно фильтруем
             if pilot_name:
-                # Получаем только пилотов, которые соответствуют фильтру
-                all_pilots = Pilot.objects.exclude(
-                    callname__istartswith='Неизвестный_'
-                ).filter(
-                    callname__icontains=pilot_name
-                ).distinct()
-                logger.debug(f"Фильтр по пилоту активен, найдено пилотов: {all_pilots.count()}")
-            else:
-                # Исключаем пилотов с именем, начинающимся с "Неизвестный_"
-                all_pilots = Pilot.objects.exclude(callname__istartswith='Неизвестный_')
-                logger.debug(f"Фильтр по пилоту не применен, всего пилотов: {all_pilots.count()}")
+                pilots_with_flights = pilots_with_flights.filter(pilot__callname__icontains=pilot_name)
+            
+            # Получаем ID пилотов, которые летали в выбранном периоде
+            pilot_ids_in_period = [pilot_id for pilot_id, _ in pilots_with_flights]
+            
+            # Получаем объекты пилотов, которые летали в выбранном периоде
+            all_pilots = Pilot.objects.filter(
+                id__in=pilot_ids_in_period
+            ).exclude(
+                callname__istartswith='Неизвестный_'
+            ).distinct()
+            
+            logger.debug(f"Пилоты с полетами в выбранном периоде: {all_pilots.count()}")
+            logger.debug(f"Список пилотов: {[p.callname for p in all_pilots]}")
 
             for pilot in all_pilots:
                 # Определяем тип дрона по полетам пилота, а не по полю pilot.drone_type
