@@ -8,8 +8,39 @@ from flights.models import Flight, FlightResultTypes
 from django.utils import timezone
 from collections import defaultdict
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+def normalize_drone_for_display(drone_name):
+    """Нормализует название дрона для отображения в статистике.
+    Преобразует все варианты КВН в два: КВН или КВН-Т"""
+    if not drone_name:
+        return drone_name
+    drone_str = str(drone_name).strip()
+    if not drone_str:
+        return drone_name
+    
+    # Приводим к нижнему регистру для проверки
+    drone_lower = drone_str.lower()
+    
+    # КВН - преобразуем все варианты в два: КВН или КВН-Т
+    # Проверяем наличие "квн" в строке (без учета регистра)
+    if 'квн' in drone_lower:
+        # Находим позицию "квн" в строке
+        kvn_pos = drone_lower.find('квн')
+        if kvn_pos != -1:
+            # Берем все после "квн" (3 символа: к, в, н)
+            substring_after_kvn = drone_lower[kvn_pos + 3:]
+            # Убираем все символы кроме букв и цифр для проверки наличия "т"
+            # Это покроет все варианты: квн-т, квн-16т, квн-16-т, квн-23т, квн-23-т, квн 16 т, квнт и т.д.
+            cleaned = re.sub(r'[^а-яё0-9]', '', substring_after_kvn)
+            if 'т' in cleaned:
+                return 'КВН-Т'
+        return 'КВН'
+    
+    # Для остальных дронов возвращаем как есть
+    return drone_name
 
 class StatisticsView(APIView):
     def get(self, request, format=None):
@@ -50,8 +81,21 @@ class StatisticsView(APIView):
             logger.debug(f"Фильтр по позывному пилота: {pilot_callname}")
 
         if drone_type:
-            flights = flights.filter(drone=drone_type)
-            logger.debug(f"Фильтр по типу дрона: {drone_type}")
+            # Нормализуем значение фильтра
+            normalized_filter_drone = normalize_drone_for_display(drone_type)
+            # Находим все варианты дронов в текущем queryset, которые нормализуются в выбранное значение
+            all_drones_in_queryset = flights.values_list('drone', flat=True).distinct()
+            matching_drones = [
+                d for d in all_drones_in_queryset
+                if normalize_drone_for_display(d) == normalized_filter_drone
+            ]
+            if matching_drones:
+                flights = flights.filter(drone__in=matching_drones)
+                logger.debug(f"Фильтр по типу дрона: {drone_type} (нормализовано: {normalized_filter_drone}, найдено вариантов: {len(matching_drones)})")
+            else:
+                # Если не найдено совпадений, фильтруем по точному значению (на случай, если это не КВН)
+                flights = flights.filter(drone=drone_type)
+                logger.debug(f"Фильтр по типу дрона (точное совпадение): {drone_type}")
 
         # --- Остальная логика остается без изменений ---
         total_flights = flights.count()
@@ -103,33 +147,68 @@ class StatisticsView(APIView):
             pilot_stats_list.append(stat)
         stats_data['pilots'] = pilot_stats_list
 
-        drone_stats = flights.values('drone').annotate(
-            total_flights=Count('id'),
-            destroyed_flights=Sum(Case(
-                When(result=FlightResultTypes.DESTROYED, then=1),
-                output_field=IntegerField()
-            )),
-            defeated_flights=Sum(Case(
-                When(result=FlightResultTypes.DEFEATED, then=1),
-                output_field=IntegerField()
-            )),
-            not_defeated_flights=Sum(Case(
-                When(result=FlightResultTypes.NOT_DEFEATED, then=1),
-                output_field=IntegerField()
-            )),
-            pilots_involved=Count('pilot', distinct=True)  # Уникальные пилоты
-        ).order_by('-total_flights')
+        # Получаем статистику по дронам и нормализуем названия
+        # Сначала получаем все записи с дронами для группировки
+        drone_flights = flights.values('drone', 'pilot', 'result').annotate(
+            count=Count('id')
+        )
+        
+        # Группируем по нормализованным названиям дронов
+        drone_stats_dict = {}
+        for flight_data in drone_flights:
+            original_drone = flight_data['drone']
+            normalized_drone = normalize_drone_for_display(original_drone)
+            
+            if normalized_drone not in drone_stats_dict:
+                drone_stats_dict[normalized_drone] = {
+                    'drone': normalized_drone,
+                    'total_flights': 0,
+                    'destroyed_flights': 0,
+                    'defeated_flights': 0,
+                    'not_defeated_flights': 0,
+                    'pilots_involved': set()
+                }
+            
+            count = flight_data['count']
+            result = flight_data['result']
+            pilot_id = flight_data['pilot']
+            
+            # Суммируем статистику
+            drone_stats_dict[normalized_drone]['total_flights'] += count
+            if result == FlightResultTypes.DESTROYED:
+                drone_stats_dict[normalized_drone]['destroyed_flights'] += count
+            elif result == FlightResultTypes.DEFEATED:
+                drone_stats_dict[normalized_drone]['defeated_flights'] += count
+            elif result == FlightResultTypes.NOT_DEFEATED:
+                drone_stats_dict[normalized_drone]['not_defeated_flights'] += count
+            
+            # Собираем уникальных пилотов
+            if pilot_id:
+                drone_stats_dict[normalized_drone]['pilots_involved'].add(pilot_id)
+        
+        # Преобразуем в список и вычисляем проценты
         drone_stats_list = []
-        for stat in drone_stats:
-            destroyed = stat['destroyed_flights'] if stat['destroyed_flights'] is not None else 0
-            defeated = stat['defeated_flights'] if stat['defeated_flights'] is not None else 0
-            not_defeated = stat['not_defeated_flights'] if stat['not_defeated_flights'] is not None else 0
+        for normalized_drone, stat in drone_stats_dict.items():
+            destroyed = stat['destroyed_flights']
+            defeated = stat['defeated_flights']
+            not_defeated = stat['not_defeated_flights']
             total = stat['total_flights']
             drone_destruction_rate = (destroyed / total * 100) if total > 0 else 0
             drone_success_rate = ((destroyed + defeated) / total * 100) if total > 0 else 0
-            stat['destruction_rate_percent'] = round(drone_destruction_rate, 2)
-            stat['success_rate_percent'] = round(drone_success_rate, 2)
-            drone_stats_list.append(stat)
+            
+            drone_stats_list.append({
+                'drone': normalized_drone,
+                'total_flights': total,
+                'destroyed_flights': destroyed,
+                'defeated_flights': defeated,
+                'not_defeated_flights': not_defeated,
+                'pilots_involved': len(stat['pilots_involved']),
+                'destruction_rate_percent': round(drone_destruction_rate, 2),
+                'success_rate_percent': round(drone_success_rate, 2)
+            })
+        
+        # Сортируем по общему количеству полетов
+        drone_stats_list.sort(key=lambda x: x['total_flights'], reverse=True)
         stats_data['drones'] = drone_stats_list
 
         result_counts = flights.values('result').annotate(count=Count('id')).order_by('-count')
@@ -292,7 +371,7 @@ class StatisticsView(APIView):
                 'id': str(flight.id),
                 'number': flight.number,
                 'pilot_name': flight.pilot.callname if flight.pilot else 'N/A',
-                'drone': flight.drone,
+                'drone': normalize_drone_for_display(flight.drone),
                 'flight_date': flight.flight_date.isoformat() if flight.flight_date else None,
                 'flight_time': flight.flight_time.isoformat() if flight.flight_time else None,
                 'target': flight.target,

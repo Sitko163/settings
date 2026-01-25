@@ -377,19 +377,11 @@
                 }
                 return 'молния';
             }
-            // КВН - преобразуем все варианты в два: квн или квн-т
+            // КВН - ищем КВН с номером или буквой (КВН-Т, КВН-23, КВН-23Т и т.д.)
             if (droneNormalized.includes('квн')) {
-                // Находим позицию "квн" в строке
-                const kvnPos = droneNormalized.indexOf('квн');
-                if (kvnPos !== -1) {
-                    // Берем все после "квн" (3 символа: к, в, н)
-                    const substringAfterKvn = droneNormalized.substring(kvnPos + 3);
-                    // Убираем все символы кроме букв и цифр для проверки наличия "т"
-                    // Это покроет все варианты: квн-т, квн-16т, квн-16-т, квн-23т, квн-23-т, квн 16 т, квнт и т.д.
-                    const cleaned = substringAfterKvn.replace(/[^а-яё0-9]/g, '');
-                    if (cleaned.includes('т')) {
-                        return 'квн-т';
-                    }
+                const match = droneNormalized.match(/квн\s*[-]?\s*(\d+[тт]?|[тт]|\d+)/i);
+                if (match) {
+                    return `квн-${match[1].toLowerCase()}`;
                 }
                 return 'квн';
             }

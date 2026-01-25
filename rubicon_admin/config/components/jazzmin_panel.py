@@ -1,5 +1,5 @@
 JAZZMIN_SETTINGS = {
-    "site_title": "8 ОТРЯД",
+    "site_title": "5 Отряд",
     "site_logo": "images/logo.png",  # если есть логотип
     "welcome_sign": "Добро пожаловать в панель админа",
 

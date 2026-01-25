@@ -1124,14 +1124,18 @@ class FlightAdmin(admin.ModelAdmin):
                                 # Всегда возвращаем версию с дефисом
                                 return f"Молния-{match.group(1).upper()}"
                             return 'Молния'
-                        # КВН - ищем КВН с номером или буквой (КВН-Т, КВН-23, КВН-23Т и т.д.)
+                        # КВН - преобразуем все варианты в два: КВН или КВН-Т
                         if 'квн' in drone_normalized:
-                            # Паттерн: КВН + опциональный дефис + цифры + опциональная буква (Т, т и т.д.)
-                            match = re.search(r'квн\s*[-]?\s*(\d+[тт]?|[тт]|\d+)', drone_normalized, re.IGNORECASE)
-                            if match:
-                                suffix = match.group(1).upper()
-                                # Всегда возвращаем версию с дефисом
-                                return f"КВН-{suffix}"
+                            # Находим позицию "квн" в строке
+                            kvn_pos = drone_normalized.find('квн')
+                            if kvn_pos != -1:
+                                # Берем все после "квн" (3 символа: к, в, н)
+                                substring_after_kvn = drone_normalized[kvn_pos + 3:]
+                                # Убираем все символы кроме букв и цифр для проверки наличия "т"
+                                # Это покроет все варианты: квн-т, квн-16т, квн-16-т, квн-23т, квн-23-т, квн 16 т, квнт и т.д.
+                                cleaned = re.sub(r'[^а-яё0-9]', '', substring_after_kvn)
+                                if 'т' in cleaned:
+                                    return 'КВН-Т'
                             return 'КВН'
                         
                         # Для остальных - нормализуем пробелы, но сохраняем дефисы

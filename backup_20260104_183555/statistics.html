@@ -878,18 +878,6 @@
     </div>
     <script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU&apikey=5f9b1e6a-a8d8-42e1-8d00-9562515bb9a0&modules=Heatmap"></script>
     <script>
-        // Вспомогательная функция для экранирования HTML
-        function escapeHtml(text) {
-            const map = {
-                '&': '&amp;',
-                '<': '&lt;',
-                '>': '&gt;',
-                '"': '&quot;',
-                "'": '&#039;'
-            };
-            return text.toString().replace(/[&<>"']/g, function(m) { return map[m]; });
-        }
-        
         // Глобальные переменные для чартов
         let dailyTrendChart = null;
         let pilotsChart = null;
@@ -928,37 +916,6 @@
                 showLoading(false);
             }
         }
-        // Функция нормализации дрона для отображения (та же логика, что и на сервере)
-        function normalizeDroneForDisplay(droneName) {
-            if (!droneName) return droneName;
-            const droneStr = String(droneName).trim();
-            if (!droneStr) return droneName;
-            
-            // Приводим к нижнему регистру для проверки
-            const droneLower = droneStr.toLowerCase();
-            
-            // КВН - преобразуем все варианты в два: КВН или КВН-Т
-            // Проверяем наличие "квн" в строке (без учета регистра)
-            if (droneLower.includes('квн')) {
-                // Находим позицию "квн" в строке
-                const kvnPos = droneLower.indexOf('квн');
-                if (kvnPos !== -1) {
-                    // Берем все после "квн" (3 символа: к, в, н)
-                    const substringAfterKvn = droneLower.substring(kvnPos + 3);
-                    // Убираем все символы кроме букв и цифр для проверки наличия "т"
-                    // Это покроет все варианты: квн-т, квн-16т, квн-16-т, квн-23т, квн-23-т, квн 16 т, квнт и т.д.
-                    const cleaned = substringAfterKvn.replace(/[^а-яё0-9]/g, '');
-                    if (cleaned.includes('т')) {
-                        return 'КВН-Т';
-                    }
-                }
-                return 'КВН';
-            }
-            
-            // Для остальных дронов возвращаем как есть
-            return droneName;
-        }
-        
         // Функция для получения списка пилотов и дронов (для фильтров)
         async function fetchFiltersData() {
             try {
@@ -967,10 +924,8 @@
                 const flightsData = await flightsResponse.json();
                 // Извлекаем уникальных пилотов, исключая "Неизвестный" пилотов
                 const pilots = [...new Set(flightsData.map(f => f.pilot_name).filter(Boolean).filter(p => !p.startsWith('Неизвестный_')))].sort();
-                // Извлекаем уникальные типы дронов и нормализуем их
-                const rawDroneTypes = flightsData.map(f => f.drone).filter(Boolean);
-                const normalizedDroneTypes = rawDroneTypes.map(d => normalizeDroneForDisplay(d));
-                const droneTypes = [...new Set(normalizedDroneTypes)].sort();
+                // Извлекаем уникальные типы дронов
+                const droneTypes = [...new Set(flightsData.map(f => f.drone).filter(Boolean))].sort();
                 // Заполняем выпадающие списки
                 const pilotSelect = document.getElementById('pilotFilter');
                 const droneSelect = document.getElementById('droneFilter');
@@ -984,7 +939,7 @@
                     option.textContent = pilot;
                     pilotSelect.appendChild(option);
                 });
-                // Добавляем типы дронов (уже нормализованные)
+                // Добавляем типы дронов
                 droneTypes.forEach(drone => {
                     const option = document.createElement('option');
                     option.value = drone;

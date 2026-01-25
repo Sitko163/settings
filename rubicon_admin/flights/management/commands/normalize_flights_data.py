@@ -62,8 +62,21 @@ class Command(BaseCommand):
             if match:
                 return f"Молния-{match.group(1).upper()}"
             return 'Молния'
+        # КВН - преобразуем все варианты в два: КВН или КВН-Т
+        if 'квн' in drone_lower:
+            # Находим позицию "квн" в строке
+            kvn_pos = drone_lower.find('квн')
+            if kvn_pos != -1:
+                # Берем все после "квн" (3 символа: к, в, н)
+                substring_after_kvn = drone_lower[kvn_pos + 3:]
+                # Убираем все символы кроме букв и цифр для проверки наличия "т"
+                # Это покроет все варианты: квн-т, квн-16т, квн-16-т, квн-23т, квн-23-т, квн 16 т, квнт и т.д.
+                cleaned = re.sub(r'[^а-яё0-9]', '', substring_after_kvn)
+                if 'т' in cleaned:
+                    return 'КВН-Т'
+            return 'КВН'
         
-        # Общая нормализация
+        # Общая нормализация для остальных дронов
         normalized = re.sub(r'[^\w\s]', '', drone_str)
         normalized = ' '.join(normalized.split())
         if normalized:
