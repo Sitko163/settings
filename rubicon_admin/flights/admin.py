@@ -217,7 +217,19 @@ class PilotAdmin(admin.ModelAdmin):
     )
     ordering = ('callname',)
     readonly_fields = ('id', 'created', 'modified')
-    actions = [send_telegram_broadcast, 'delete_all']
+    actions = [send_telegram_broadcast, 'delete_all', 'delete_unknown_pilots']
+    
+    def delete_unknown_pilots(self, request, queryset):
+        """Удалить всех пилотов с позывным Неизвестный_* (и связанные полёты)."""
+        to_delete = Pilot.objects.filter(callname__istartswith='Неизвестный_')
+        count = to_delete.count()
+        to_delete.delete()
+        self.message_user(
+            request,
+            f'Удалено пилотов «Неизвестный_*»: {count}. Связанные полёты удалены (CASCADE).',
+            level=messages.SUCCESS
+        )
+    delete_unknown_pilots.short_description = "Удалить пилотов Неизвестный_*"
     
     def delete_all(self, request, queryset):
         """Удалить все записи"""
@@ -1451,53 +1463,44 @@ class FlightAdmin(admin.ModelAdmin):
                                     if len(parts) > 1:
                                         callname_to_search = parts[1]  # Берем вторую часть
                                 
-                                # Если позывной пустой после очистки, создаем временного пилота
+                                # Если позывной пустой после очистки — не создаём "Неизвестный_N", строка будет пропущена
                                 if not callname_to_search:
-                                    callname_to_search = f"Неизвестный_{row_idx}"
-                                    logger.debug(f"Строка {row_idx}: пустой позывной, создан временный: '{callname_to_search}'")
-                                
-                                # Ищем пилота в кэше (быстрее чем запрос к БД)
-                                callname_lower = callname_to_search.lower()
-                                pilot = pilots_cache.get(callname_lower)
-                                
-                                if pilot is None:
-                                    # Проверяем список новых пилотов
-                                    if callname_to_search in new_pilots:
-                                        pilot = new_pilots[callname_to_search]
-                                    else:
-                                        # Создаем нового пилота и сохраняем сразу в БД
-                                        import uuid
-                                        temp_tg_id = abs(hash(callname_to_search)) % (10 ** 10)
-                                        while Pilot.objects.filter(tg_id=temp_tg_id).exists():
-                                            temp_tg_id = abs(hash(f"{callname_to_search}{uuid.uuid4()}")) % (10 ** 10)
-                                        
-                                        # Сохраняем пилота сразу, чтобы получить id для foreign key
-                                        pilot, created = Pilot.objects.get_or_create(
-                                            callname=callname_to_search,
-                                            defaults={'tg_id': temp_tg_id}
-                                        )
-                                        if created:
-                                            logger.info(f"Автоматически создан пилот '{callname_to_search}' с временным TG ID: {temp_tg_id}")
-                                        
-                                        # Добавляем в кэши
-                                        new_pilots[callname_to_search] = pilot
-                                        pilots_cache[callname_lower] = pilot
+                                    logger.debug(f"Строка {row_idx}: пустой позывной, строка будет пропущена")
+                                else:
+                                    # Ищем пилота в кэше (быстрее чем запрос к БД)
+                                    callname_lower = callname_to_search.lower()
+                                    pilot = pilots_cache.get(callname_lower)
+                                    
+                                    if pilot is None:
+                                        # Проверяем список новых пилотов
+                                        if callname_to_search in new_pilots:
+                                            pilot = new_pilots[callname_to_search]
+                                        else:
+                                            # Создаем нового пилота и сохраняем сразу в БД
+                                            import uuid
+                                            temp_tg_id = abs(hash(callname_to_search)) % (10 ** 10)
+                                            while Pilot.objects.filter(tg_id=temp_tg_id).exists():
+                                                temp_tg_id = abs(hash(f"{callname_to_search}{uuid.uuid4()}")) % (10 ** 10)
+                                            
+                                            # Сохраняем пилота сразу, чтобы получить id для foreign key
+                                            pilot, created = Pilot.objects.get_or_create(
+                                                callname=callname_to_search,
+                                                defaults={'tg_id': temp_tg_id}
+                                            )
+                                            if created:
+                                                logger.info(f"Автоматически создан пилот '{callname_to_search}' с временным TG ID: {temp_tg_id}")
+                                            
+                                            # Добавляем в кэши
+                                            new_pilots[callname_to_search] = pilot
+                                            pilots_cache[callname_lower] = pilot
                             else:
-                                # Если пилота нет, но есть другие данные - создаем временного пилота
-                                # Используем номер строки как идентификатор
-                                import uuid
-                                temp_callname = f"Неизвестный_{row_idx}"
-                                temp_tg_id = abs(hash(f"temp_{row_idx}")) % (10 ** 10)
-                                while Pilot.objects.filter(tg_id=temp_tg_id).exists():
-                                    temp_tg_id = abs(hash(f"temp_{row_idx}_{uuid.uuid4()}")) % (10 ** 10)
-                                
-                                pilot, created = Pilot.objects.get_or_create(
-                                    callname=temp_callname,
-                                    defaults={'tg_id': temp_tg_id}
-                                )
-                                if created:
-                                    logger.info(f"Создан временный пилот '{temp_callname}' для строки {row_idx}")
-                                pilots_cache[temp_callname.lower()] = pilot
+                                # Колонка пилота пуста — не создаём "Неизвестный_N", строка будет пропущена
+                                pilot = None
+
+                            # Строки без валидного пилота пропускаем (не создаём полёты и не создаём фейковых пилотов)
+                            if pilot is None:
+                                skipped_no_pilot += 1
+                                continue
 
                             # Время из колонки B
                             time_str = row_values[COL_TIME - 1] if len(row_values) >= COL_TIME else None
