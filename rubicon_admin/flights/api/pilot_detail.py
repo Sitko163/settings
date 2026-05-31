@@ -1,10 +1,15 @@
-from django.db.models import Count, Q, Case, When, IntegerField, Sum
-from django.db.models.functions import TruncDate
+from django.db.models import Count
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from datetime import datetime
 from flights.models import Flight, FlightResultTypes, Pilot
+from flights.utils.success_stats import (
+    aggregate_daily_success_stats,
+    aggregate_success_counts,
+    empty_success_counts,
+    success_total,
+)
 from django.utils import timezone
 import logging
 
@@ -40,79 +45,35 @@ class PilotDetailView(APIView):
         # Получаем все полеты пилота
         flights = Flight.objects.filter(pilot=pilot).select_related('pilot')
 
-        # Общая статистика
         total_flights = flights.count()
-        destroyed_flights = flights.filter(result=FlightResultTypes.DESTROYED).count()
-        defeated_flights = flights.filter(result=FlightResultTypes.DEFEATED).count()
+        success_counts = aggregate_success_counts(flights)
+        success_flights_count = success_total(success_counts)
         not_defeated_flights = flights.filter(result=FlightResultTypes.NOT_DEFEATED).count()
-        destruction_rate = (destroyed_flights / total_flights * 100) if total_flights > 0 else 0
-        success_rate = ((destroyed_flights + defeated_flights) / total_flights * 100) if total_flights > 0 else 0
+        success_rate = (success_flights_count / total_flights * 100) if total_flights > 0 else 0
 
-        # Группировка вылетов по целям
-        flights_by_target = flights.values('target').annotate(
-            total=Count('id'),
-            destroyed=Sum(Case(
-                When(result=FlightResultTypes.DESTROYED, then=1),
-                output_field=IntegerField()
-            )),
-            defeated=Sum(Case(
-                When(result=FlightResultTypes.DEFEATED, then=1),
-                output_field=IntegerField()
-            )),
-            not_defeated=Sum(Case(
-                When(result=FlightResultTypes.NOT_DEFEATED, then=1),
-                output_field=IntegerField()
-            )),
-        ).order_by('-total')
+        target_groups = {}
+        for row in flights.values('target', 'result_raw').iterator():
+            target_name = row['target'] or 'Без указания цели'
+            if target_name not in target_groups:
+                target_groups[target_name] = {'total': 0, **empty_success_counts()}
+            target_groups[target_name]['total'] += 1
+            category = FlightResultTypes.success_category_from_raw(row['result_raw'])
+            if category:
+                target_groups[target_name][category] += 1
 
         targets_data = []
-        for target_stat in flights_by_target:
-            target_name = target_stat['target'] or 'Без указания цели'
-            destroyed = target_stat['destroyed'] if target_stat['destroyed'] is not None else 0
-            defeated = target_stat['defeated'] if target_stat['defeated'] is not None else 0
-            not_defeated = target_stat['not_defeated'] if target_stat['not_defeated'] is not None else 0
-            total = target_stat['total']
-            
+        for target_name, stat in sorted(target_groups.items(), key=lambda item: item[1]['total'], reverse=True):
+            total = stat['total']
+            success = success_total(stat)
             targets_data.append({
                 'target': target_name,
                 'total': total,
-                'destroyed': destroyed,
-                'defeated': defeated,
-                'not_defeated': not_defeated,
-                'destruction_rate': round((destroyed / total * 100) if total > 0 else 0, 2),
+                'porazheno': stat['porazheno'],
+                'not_defeated': max(total - success, 0),
+                'success_rate': round((success / total * 100) if total > 0 else 0, 2),
             })
 
-        # Динамика по датам
-        daily_stats = flights.annotate(flight_day=TruncDate('flight_date')).values('flight_day').annotate(
-            total_flights=Count('id'),
-            destroyed_flights=Sum(Case(
-                When(result=FlightResultTypes.DESTROYED, then=1),
-                output_field=IntegerField()
-            )),
-            defeated_flights=Sum(Case(
-                When(result=FlightResultTypes.DEFEATED, then=1),
-                output_field=IntegerField()
-            )),
-            not_defeated_flights=Sum(Case(
-                When(result=FlightResultTypes.NOT_DEFEATED, then=1),
-                output_field=IntegerField()
-            )),
-        ).order_by('flight_day')
-
-        daily_trend = []
-        for stat in daily_stats:
-            destroyed = stat['destroyed_flights'] if stat['destroyed_flights'] is not None else 0
-            defeated = stat['defeated_flights'] if stat['defeated_flights'] is not None else 0
-            not_defeated = stat['not_defeated_flights'] if stat['not_defeated_flights'] is not None else 0
-            total = stat['total_flights']
-            
-            daily_trend.append({
-                'date': stat['flight_day'].isoformat() if stat['flight_day'] else None,
-                'total_flights': total,
-                'destroyed_flights': destroyed,
-                'defeated_flights': defeated,
-                'not_defeated_flights': not_defeated,
-            })
+        daily_trend = aggregate_daily_success_stats(flights)
 
         # Статистика по БК (боеприпасы/компоненты)
         # Дроны
@@ -165,6 +126,7 @@ class PilotDetailView(APIView):
                         'target': flight.target or '',
                         'drone': flight.drone or '',
                         'result': flight.result or '',
+                        'result_raw': flight.result_raw or '',
                         'coordinates': flight.coordinates or '',
                         'distance': flight.distance or '',
                         'comment': flight.comment or '',
@@ -184,10 +146,9 @@ class PilotDetailView(APIView):
                 },
                 'statistics': {
                     'total_flights': total_flights,
-                    'destroyed_flights': destroyed_flights,
-                    'defeated_flights': defeated_flights,
+                    'porazheno_flights': success_counts['porazheno'],
+                    'success_total': success_flights_count,
                     'not_defeated_flights': not_defeated_flights,
-                    'destruction_rate': round(destruction_rate, 2),
                     'success_rate': round(success_rate, 2),
                 },
                 'flights_by_target': targets_data,

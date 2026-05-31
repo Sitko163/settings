@@ -230,6 +230,16 @@ def map_view(request):
     return render(request, 'map.html', context)
 
 @login_required(login_url='login')
+def dashboard_view(request):
+    response = render(request, 'dashboard.html', {
+        'yandex_api_key': settings.YANDEX_API_KEY,
+    })
+    response['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+    response['Pragma'] = 'no-cache'
+    return response
+
+
+@login_required(login_url='login')
 def statistics_view(request):
     return render(request, 'statistics.html')
 

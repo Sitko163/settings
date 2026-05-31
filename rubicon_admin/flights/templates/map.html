@@ -766,7 +766,31 @@
         let targetsList = new Set();
         let currentMapBounds = null;
         let isUpdating = false;
+        let mapInitialized = false;
+        let visibilityListenerAttached = false;
 
+        const RESULT_PRIORITY = { destroyed: 3, defeated: 2, 'not defeated': 1 };
+
+        function flightDedupeKey(flight) {
+            return [
+                flight.pilot_name || '',
+                flight.number ?? '',
+                flight.flight_date || '',
+                flight.coordinates || '',
+            ].join('|');
+        }
+
+        function dedupeFlights(flights) {
+            const byKey = new Map();
+            flights.forEach(flight => {
+                const key = flightDedupeKey(flight);
+                const prev = byKey.get(key);
+                if (!prev || (RESULT_PRIORITY[flight.result] || 0) > (RESULT_PRIORITY[prev.result] || 0)) {
+                    byKey.set(key, flight);
+                }
+            });
+            return Array.from(byKey.values());
+        }
 
         function loadYandexMap() {
             if (!window.YANDEX_API_KEY || window.YANDEX_API_KEY === 'None' || window.YANDEX_API_KEY === '') {
@@ -785,31 +809,6 @@
             };
             script.onerror = mapLoadError;
             document.head.appendChild(script);
-        }
-
-        function init() {
-            document.getElementById('loading').style.display = 'none';
-
-            myMap = new ymaps.Map("map", {
-                center: [55.7558, 37.6176],
-                zoom: 3,
-                type: 'yandex#hybrid',
-                controls: ['zoomControl', 'typeSelector', 'fullscreenControl']
-            });
-
-            objectManager = new ymaps.ObjectManager({
-                clusterize: true,
-                gridSize: 64,
-                clusterDisableClickZoom: false
-            });
-
-            objectManager.clusters.options.set({
-                preset: 'islands#invertedRedClusterIcons'
-            });
-
-            myMap.geoObjects.add(objectManager);
-
-            loadFlights();
         }
 
         // Сохраняем границы карты перед применением фильтров
@@ -1161,15 +1160,19 @@
         // Обновленная функция updateFlightsOnMap без автоматического изменения границ
         function updateFlightsOnMap() {
             console.log('Обновляем точки на карте...');
+            if (!objectManager) {
+                return;
+            }
             objectManager.removeAll();
 
             const geoObjects = [];
+            const flightsToRender = dedupeFlights(filteredFlights);
 
             let skipped_no_coords = 0;
             let skipped_invalid_coords = 0;
             let added_count = 0;
             
-            filteredFlights.forEach((flight, index) => {
+            flightsToRender.forEach((flight, index) => {
                 if (!flight.coordinates_info) {
                     skipped_no_coords++;
                     if (skipped_no_coords <= 5) {
@@ -1248,8 +1251,8 @@
             
             console.log(`Добавлено точек на карту: ${added_count}, пропущено без координат: ${skipped_no_coords}, пропущено невалидных: ${skipped_invalid_coords}`);
             console.log('Создано геообъектов:', geoObjects.length);
-            console.log(`Всего отфильтровано полетов: ${filteredFlights.length}`);
-            if (added_count === 0 && filteredFlights.length > 0) {
+            console.log(`Всего отфильтровано полетов: ${filteredFlights.length}, уникальных на карте: ${flightsToRender.length}`);
+            if (added_count === 0 && flightsToRender.length > 0) {
                 console.warn('⚠️ ВНИМАНИЕ: Нет точек на карте, но есть отфильтрованные полеты!');
                 if (filteredFlights.length > 0) {
                     console.log('Пример первого отфильтрованного полета:', filteredFlights[0]);
@@ -1470,7 +1473,7 @@
                 const result = flight.result || 'Не указан';
                 resultCounts[result] = (resultCounts[result] || 0) + 1;
 
-                if (flight.result === 'destroyed') {
+                if (flight.result === 'destroyed' || flight.result === 'defeated') {
                     successfulFlights++;
                 }
             });
@@ -1522,6 +1525,10 @@
         }
 
         function setupVisibilityListener() {
+            if (visibilityListenerAttached || !myMap) {
+                return;
+            }
+            visibilityListenerAttached = true;
             let boundsChangeTimeout;
 
             myMap.events.add('boundschange', function() {
@@ -1594,8 +1601,12 @@
             }, 3000);
         }
 
-        // Обновленная функция инициализации
         function init() {
+            if (mapInitialized) {
+                console.warn('Карта уже инициализирована, пропуск повторного init');
+                return;
+            }
+            mapInitialized = true;
             console.log('Инициализация карты...');
             document.getElementById('loading').style.display = 'none';
 
@@ -1659,8 +1670,8 @@
                         console.warn('⚠️ API вернул пустой массив полетов!');
                     }
 
-                    allFlights = data;
-                    filteredFlights = [...data];
+                    allFlights = dedupeFlights(data);
+                    filteredFlights = [...allFlights];
 
                     console.log('Всего полетов после загрузки:', allFlights.length);
                     console.log('Отфильтровано полетов:', filteredFlights.length);

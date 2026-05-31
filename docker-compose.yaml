@@ -1,20 +1,26 @@
 services:
+  # Отдельный rubicon_tg_bot не нужен — бот: Rubikon/telegram-bot (aviasales-telegram-bot)
   tg-bot:
+    profiles: ["legacy-bot"]
     build:
-      context: tg_bot
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: api/Dockerfile
     env_file:
       - ./.env
     environment:
       - TZ=Europe/Moscow
     container_name: rubicon_tg_bot
-    restart: always
+    restart: "no"
+    entrypoint: ["python", "manage.py", "run_telegram_bot"]
+    working_dir: /code
     depends_on:
-      - database
-      - redis
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
-      - videos:/usr/src/app/files
-      - ./video_files:/usr/src/app/files
+      - ./rubicon_admin:/code:rw
+      - ./tg_bot:/code/tg_bot:rw
     networks:
       - app_network
 
@@ -46,6 +52,7 @@ services:
     restart: always
     volumes:
       - ./rubicon_admin:/code:rw
+      - ./tg_bot:/code/tg_bot:ro
       - static_volume:/code/static:rw
       - videos:/code/static/video
       - ./video_files:/code/static/video

@@ -27,6 +27,7 @@ COPY ./api/entrypoint.sh /web/entrypoint.sh
 RUN chmod +x /web/entrypoint.sh
 
 COPY rubicon_admin/ .
+COPY tg_bot/ /code/tg_bot/
 
 RUN mkdir -p static
 RUN mkdir -p /code/static/videos

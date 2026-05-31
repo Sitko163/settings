@@ -17,7 +17,7 @@ from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 from flights.models import Pilot, ExplosiveDevice, ExplosiveType, Drone, TargetType, CorrectiveType, Flight, \
     FlightResultTypes, \
-    FlightObjectiveTypes, User, DirectionType, DroneTypes, ImportProgress
+    FlightObjectiveTypes, User, DirectionType, DroneTypes, ImportProgress, LiveFlight
 from telegram import Bot
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -194,6 +194,15 @@ class DirectionTypeAdmin(admin.ModelAdmin):
 class CorrectiveTypeAdmin(admin.ModelAdmin):
     search_fields = ('name',)
     ordering = ('name',)
+
+
+@admin.register(LiveFlight)
+class LiveFlightAdmin(admin.ModelAdmin):
+    list_display = ('pilot', 'started_at', 'ended_at', 'close_reason', 'telegram_user_id')
+    list_filter = ('close_reason',)
+    search_fields = ('pilot__callname',)
+    readonly_fields = ('id', 'created', 'modified')
+    ordering = ('-started_at',)
 
 
 @admin.register(Pilot)
@@ -1205,6 +1214,7 @@ class FlightAdmin(admin.ModelAdmin):
                     skipped_no_pilot = 0  # Счетчик пропущенных строк без пилота
                     processed_successfully = 0  # Счетчик успешно обработанных строк
                     skipped_duplicates = 0  # Счетчик пропущенных дубликатов
+                    updated_result_raw = 0  # Обновлён «Результат применения» у существующих вылетов
                     
                     for row_idx in range(data_start_row, data_end_row + 1):
                         processed_row_count += 1
@@ -1633,15 +1643,8 @@ class FlightAdmin(admin.ModelAdmin):
 
                             # Результат применения из колонки O
                             result_raw = row_values[COL_RESULT - 1] if len(row_values) >= COL_RESULT else None
-                            result = FlightResultTypes.NOT_DEFEATED
-                            if result_raw:
-                                result_str = str(result_raw).lower().strip()
-                                if "уничтож" in result_str:
-                                    result = FlightResultTypes.DESTROYED
-                                elif "не п" in result_str:
-                                    result = FlightResultTypes.NOT_DEFEATED
-                                elif "подавл" in result_str or "успеш" in result_str or "пораж" in result_str:
-                                    result = FlightResultTypes.DEFEATED
+                            result_raw_text = str(result_raw).strip() if result_raw else ''
+                            result = FlightResultTypes.from_excel_text(result_raw)
 
                             # Координаты из колонок E и F
                             coord_x = row_values[COL_COORD_X - 1] if len(row_values) >= COL_COORD_X else None
@@ -1776,6 +1779,7 @@ class FlightAdmin(admin.ModelAdmin):
                                 'target': target,
                                 'corrective': corrective,
                                 'result': result,
+                                'result_raw': result_raw_text or None,
                                 'drone': drone,
                                 'explosive_type': explosive_type,
                                 'explosive_device': explosive_device,
@@ -1808,6 +1812,23 @@ class FlightAdmin(admin.ModelAdmin):
                                 if skipped_duplicates <= 10:  # Логируем только первые 10
                                     logger.debug(f"Пропущен дубликат полета в текущем импорте: номер={flight_number}, пилот={pilot.callname if pilot else None}, дата={flight_defaults.get('flight_date')}, время={flight_defaults.get('flight_time')}")
                                 continue
+
+                            # Существующий вылет по ключу — дополняем result_raw из колонки «Результат»
+                            existing_by_key = Flight.objects.filter(
+                                number=flight_number,
+                                pilot=pilot,
+                                flight_date=flight_defaults.get('flight_date'),
+                                flight_time=flight_defaults.get('flight_time'),
+                            ).first()
+                            if existing_by_key:
+                                if result_raw_text and (existing_by_key.result_raw or '') != result_raw_text:
+                                    existing_by_key.result_raw = result_raw_text
+                                    existing_by_key.result = result
+                                    existing_by_key.save(update_fields=['result_raw', 'result'])
+                                    updated_result_raw += 1
+                                skipped_duplicates += 1
+                                existing_flights_set.add(flight_key)
+                                continue
                             
                             # Строгая проверка на полностью одинаковые записи (все поля)
                             # Проверяем в базе данных на полностью одинаковые записи только если не найден в текущем импорте
@@ -1822,6 +1843,7 @@ class FlightAdmin(admin.ModelAdmin):
                                     target=flight_defaults.get('target'),
                                     drone=flight_defaults.get('drone'),
                                     result=flight_defaults.get('result'),
+                                    result_raw=flight_defaults.get('result_raw'),
                                     coordinates=flight_defaults.get('coordinates'),
                                     distance=flight_defaults.get('distance'),
                                     explosive_type=flight_defaults.get('explosive_type'),
@@ -2249,6 +2271,8 @@ class FlightAdmin(admin.ModelAdmin):
                     total_skipped = skipped_no_flight_number + skipped_errors + skipped_no_date + skipped_no_pilot
                     summary_message = f"Импорт из файла '{xlsx_file.name}' завершен:\n"
                     summary_message += f"  - Создано записей: {created_count}\n"
+                    if updated_result_raw:
+                        summary_message += f"  - Обновлён «Результат применения» у существующих вылетов: {updated_result_raw}\n"
                     summary_message += f"  - Успешно обработано строк: {processed_successfully}\n"
                     summary_message += f"  - Обработано строк из файла: {processed_row_count} из {total_rows_to_process} (до строки {data_start_row + processed_row_count - 1})\n"
                     if empty_rows_count >= MAX_EMPTY_ROWS:

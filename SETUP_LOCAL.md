@@ -67,6 +67,13 @@ docker compose logs -f
 
 - **API**: http://localhost:8888/api/flights/
 
+- **Дашборд (Старт/Стоп)**: http://localhost:8888/dashboard/
+
+- **Telegram-бот**: поднимается вместе со стеком (`rubicon_tg_bot`, `python manage.py run_telegram_bot`).  
+  Один `.env`, одна БД с Django. Не запускайте второй экземпляр бота с тем же `TOKEN`.
+
+  В `.env` для группы Старт/Стоп: `TELEGRAM_LIVE_FLIGHT_CHAT_ID=-1003960872491`
+
 ## Шаг 5: Первоначальная настройка
 
 1. Войдите в админ-панель Django

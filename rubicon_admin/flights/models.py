@@ -188,6 +188,63 @@ class FlightResultTypes(models.TextChoices):
     NOT_DEFEATED = 'not defeated', _('not defeated')
     DESTROYED = 'destroyed', _('destroyed')
 
+    @classmethod
+    def map_success_values(cls):
+        """Результаты, отображаемые на карте по умолчанию (успешные вылеты)."""
+        return (cls.DESTROYED, cls.DEFEATED)
+
+    @classmethod
+    def result_priority(cls, result):
+        """Приоритет результата при дедупликации точек на карте."""
+        return {
+            cls.DESTROYED: 3,
+            cls.DEFEATED: 2,
+            cls.NOT_DEFEATED: 1,
+        }.get(result, 0)
+
+    @staticmethod
+    def map_dedupe_key(flight):
+        """Ключ уникальности вылета на карте (повторный импорт Excel)."""
+        return (
+            str(flight.pilot_id),
+            flight.number,
+            str(flight.flight_date),
+            flight.coordinates or '',
+        )
+
+    @classmethod
+    def from_excel_text(cls, result_raw):
+        """Нормализация значения «Результат применения» из сводной Excel."""
+        if not result_raw:
+            return cls.NOT_DEFEATED
+        result_str = str(result_raw).lower().strip()
+        if 'уничтож' in result_str:
+            return cls.DESTROYED
+        if 'не п' in result_str:
+            return cls.NOT_DEFEATED
+        if any(
+            marker in result_str
+            for marker in ('подавл', 'успеш', 'успех', 'пораж', 'доставк')
+        ):
+            return cls.DEFEATED
+        return cls.NOT_DEFEATED
+
+    @classmethod
+    def success_category_from_raw(cls, result_raw, result_enum=None, comment=None):
+        """Категория KPI только по колонке «Результат применения» (result_raw)."""
+        if not result_raw:
+            return None
+        result_str = str(result_raw).lower().strip()
+        if 'уничтож' in result_str or 'не п' in result_str:
+            return None
+        if 'доставк' in result_str:
+            return None
+        # KPI «Поражено» — только явное поражение/подавление; «Успешно» не учитываем.
+        if 'пораж' in result_str or 'подавл' in result_str:
+            return 'porazheno'
+        return None
+
+
 class FlightObjectiveTypes(models.TextChoices):
     EXISTS = 'exists', _('exists')
     NOT_EXISTS = 'not exists', _('not exists')
@@ -213,6 +270,13 @@ class Flight(UUIDMixin, TimeStampedMixin):
         max_length=31,
         choices=FlightResultTypes.choices,
         default=FlightResultTypes.NOT_DEFEATED,
+    )
+    result_raw = models.CharField(
+        _('result raw'),
+        max_length=127,
+        blank=True,
+        null=True,
+        help_text=_('Исходный текст результата из сводной Excel'),
     )
     coordinates = models.CharField(_('coordinates'), max_length=127, null=True, blank=True)
     direction = models.CharField(_('direction'), max_length=255, null=True, blank=True)
@@ -612,4 +676,97 @@ class ImportProgress(TimeStampedMixin, UUIDMixin, models.Model):
     def __str__(self):
         status = "✓" if self.is_completed else "⏳"
         return f"{status} {self.file_name} (строка {self.last_processed_row}/{self.total_rows})"
+
+
+class LiveFlightCloseReason(models.TextChoices):
+    STOP = 'stop', _('Stop')
+    NEW_START = 'new_start', _('New start')
+    TIMEOUT = 'timeout', _('Timeout')
+
+
+class LiveFlight(UUIDMixin, TimeStampedMixin):
+    """Оперативный вылет из Telegram (Старт/Стоп)."""
+    pilot = models.ForeignKey(
+        Pilot,
+        verbose_name=_('pilot'),
+        on_delete=models.CASCADE,
+        related_name='live_flights',
+    )
+    telegram_user_id = models.PositiveBigIntegerField(_('telegram user id'), db_index=True)
+    chat_id = models.BigIntegerField(_('chat id'))
+    started_at = models.DateTimeField(_('started at'), db_index=True)
+    ended_at = models.DateTimeField(_('ended at'), null=True, blank=True, db_index=True)
+    close_reason = models.CharField(
+        _('close reason'),
+        max_length=16,
+        choices=LiveFlightCloseReason.choices,
+        null=True,
+        blank=True,
+    )
+    message_id_start = models.BigIntegerField(null=True, blank=True)
+    message_id_stop = models.BigIntegerField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'public"."live_flight'
+        verbose_name = _('live flight')
+        verbose_name_plural = _('live flights')
+        ordering = ('-started_at',)
+
+    def __str__(self):
+        return f'{self.pilot.callname} {self.started_at}'
+
+
+class DashboardAlert(UUIDMixin, TimeStampedMixin):
+    """Оповещение из топика Telegram (дашборд)."""
+    chat_id = models.BigIntegerField(_('chat id'))
+    message_thread_id = models.BigIntegerField(_('topic id'), null=True, blank=True)
+    telegram_message_id = models.BigIntegerField(_('telegram message id'))
+    text = models.TextField(_('text'))
+    posted_at = models.DateTimeField(_('posted at'), db_index=True)
+
+    class Meta:
+        db_table = 'public"."dashboard_alert'
+        verbose_name = _('dashboard alert')
+        verbose_name_plural = _('dashboard alerts')
+        ordering = ('-posted_at',)
+        constraints = [
+            models.UniqueConstraint(
+                fields=['chat_id', 'telegram_message_id'],
+                name='dashboard_alert_chat_message_uniq',
+            ),
+        ]
+
+    def __str__(self):
+        preview = (self.text or '')[:60]
+        return f'{self.posted_at} {preview}'
+
+
+class TelegramFlightReport(UUIDMixin, TimeStampedMixin):
+    """Вылет из Telegram-отчёта (топик 2406 — короткий формат)."""
+    chat_id = models.BigIntegerField(_('chat id'), db_index=True)
+    message_thread_id = models.BigIntegerField(_('topic id'), null=True, blank=True, db_index=True)
+    telegram_message_id = models.BigIntegerField(_('telegram message id'))
+    flight_number = models.IntegerField(_('flight number'), default=0)
+    work_date = models.CharField(_('work date'), max_length=32, blank=True)
+    result = models.CharField(_('result'), max_length=512, blank=True)
+    pilot_callsign = models.CharField(_('pilot callsign'), max_length=255, blank=True)
+    is_successful = models.BooleanField(_('is successful'), default=False, db_index=True)
+    parse_ok = models.BooleanField(_('parse ok'), default=True)
+    sent_at = models.DateTimeField(_('sent at'), db_index=True)
+    raw_text = models.TextField(_('raw text'), blank=True)
+
+    class Meta:
+        db_table = 'public"."telegram_flight_report'
+        verbose_name = _('telegram flight report')
+        verbose_name_plural = _('telegram flight reports')
+        ordering = ('-sent_at',)
+        constraints = [
+            models.UniqueConstraint(
+                fields=['chat_id', 'telegram_message_id'],
+                name='telegram_flight_report_chat_msg_uniq',
+            ),
+        ]
+
+    def __str__(self):
+        return f'№{self.flight_number} {self.work_date} {self.result[:40]}'
 

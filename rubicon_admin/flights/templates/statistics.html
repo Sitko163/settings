@@ -763,8 +763,8 @@
                             <canvas id="dailyTrendChart"></canvas>
                         </div>
                     </div>
-                    <div class="chart-container" onclick="openChartModal('pilotsChart', 'Уничтожения по пилотам')">
-                        <h3>Уничтожения по пилотам</h3>
+                    <div class="chart-container" onclick="openChartModal('pilotsChart', 'Успешные вылеты по пилотам')">
+                        <h3>Успешные вылеты по пилотам</h3>
                         <div class="chart-canvas-wrapper">
                             <canvas id="pilotsChart"></canvas>
                         </div>
@@ -781,8 +781,8 @@
                             <canvas id="pilotsUsageChart"></canvas>
                         </div>
                     </div>
-                    <div class="chart-container" onclick="openChartModal('targetsChart', 'Уничтоженные цели')">
-                        <h3>Уничтоженные цели</h3>
+                    <div class="chart-container" onclick="openChartModal('targetsChart', 'Успешные цели')">
+                        <h3>Успешные цели</h3>
                         <div class="chart-canvas-wrapper">
                             <canvas id="targetsChart"></canvas>
                         </div>
@@ -804,7 +804,7 @@
                                 <tr>
                                     <th>Пилот</th>
                                     <th>Цель</th>
-                                    <th>Количество уничтожений</th>
+                                    <th>Успешных применений</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -827,8 +827,7 @@
                                 <tr>
                                     <th>Пилот</th>
                                     <th>Всего вылетов</th>
-                                    <th>Уничтожено</th>
-                                    <th>% Уничтожения</th>
+                                    <th>Поражено</th>
                                     <th>% Успеха</th>
                                 </tr>
                             </thead>
@@ -848,8 +847,7 @@
                                 <tr>
                                     <th>Тип дрона</th>
                                     <th>Всего вылетов</th>
-                                    <th>Уничтожено</th>
-                                    <th>% Уничтожения</th>
+                                    <th>Поражено</th>
                                     <th>% Успеха</th>
                                 </tr>
                             </thead>
@@ -906,6 +904,7 @@
             showLoading(true);
             try {
                 const url = new URL('/api/statistics/', window.location.origin);
+                url.searchParams.set('_', String(Date.now()));
                 // Добавляем параметры фильтрации
                 Object.keys(filters).forEach(key => {
                     if (filters[key]) {
@@ -1140,32 +1139,44 @@
                 updateHeatmap(data.heatmap_points);
             }
         }
-        // Функция для обновления KPI карточек
+        // KPI: Поражено и сводные показатели
         function updateKPI(kpiData, summaryData) {
             const kpiGrid = document.getElementById('kpiGrid');
-            // Очищаем существующие карточки
             kpiGrid.innerHTML = '';
-            // Создаем карточки KPI
+
+            const porazheno = Number(kpiData.porazheno_flights) || 0;
+            const successTotal = porazheno;
+            const totalFlights = Number(kpiData.total_flights) || 0;
+            const notDefeated = Number(kpiData.not_defeated_flights) || 0;
+            const successRate = totalFlights > 0
+                ? ((successTotal / totalFlights) * 100).toFixed(1)
+                : '0';
+
             const kpiCards = [
                 {
                     label: 'Всего вылетов',
-                    value: kpiData.total_flights,
+                    value: totalFlights,
                     class: 'kpi-effective'
                 },
                 {
-                    label: 'Уничтожено',
-                    value: kpiData.destroyed_flights,
-                    class: 'kpi-success-rate' // Используем зеленый цвет
+                    label: 'Поражено',
+                    value: porazheno,
+                    class: 'kpi-success-rate'
                 },
                 {
-                    label: 'Процент уничтожения',
-                    value: kpiData.destruction_rate_percent + '%',
-                    class: 'kpi-success-rate' // Используем зеленый цвет
+                    label: 'Не поражено',
+                    value: notDefeated,
+                    class: ''
+                },
+                {
+                    label: 'Успешных всего',
+                    value: successTotal,
+                    class: 'kpi-success-rate'
                 },
                 {
                     label: 'Процент успеха',
-                    value: kpiData.success_rate_percent + '%',
-                    class: 'kpi-effective' // Используем синий цвет
+                    value: successRate + '%',
+                    class: 'kpi-effective'
                 },
                 {
                     label: 'Самый активный',
@@ -1204,9 +1215,7 @@
             const dailyCtx = document.getElementById('dailyTrendChart').getContext('2d');
             const dates = data.daily_trend.map(d => d.date);
             const totalFlights = data.daily_trend.map(d => d.total_flights);
-            const destroyedFlights = data.daily_trend.map(d => d.destroyed_flights);
-            const defeatedFlights = data.daily_trend.map(d => d.defeated_flights);
-            const notDefeatedFlights = data.daily_trend.map(d => d.not_defeated_flights);
+            const porazhenoFlights = data.daily_trend.map(d => d.porazheno_flights || 0);
             dailyTrendChart = new Chart(dailyCtx, {
                 type: 'line',
                 data: {
@@ -1223,18 +1232,9 @@
                         },
                         {
                             label: 'Поражено',
-                            data: defeatedFlights,
-                            borderColor: '#4caf50', // Зеленый
+                            data: porazhenoFlights,
+                            borderColor: '#4caf50',
                             backgroundColor: 'rgba(76, 175, 80, 0.1)',
-                            borderWidth: 2,
-                            fill: true,
-                            tension: 0.4
-                        },
-                        {
-                            label: 'Уничтожено',
-                            data: destroyedFlights,
-                            borderColor: '#f44336', // Красный
-                            backgroundColor: 'rgba(244, 67, 54, 0.1)',
                             borderWidth: 2,
                             fill: true,
                             tension: 0.4
@@ -1274,35 +1274,19 @@
             // 2. График по пилотам (обновлен на стековую гистограмму с разбивкой)
             const pilotsCtx = document.getElementById('pilotsChart').getContext('2d');
             const pilotNames = data.pilots.map(p => p.pilot__callname || 'Без имени');
-            const pilotDestroyed = data.pilots.map(p => p.destroyed_flights || 0);
-            const pilotDefeated = data.pilots.map(p => p.defeated_flights || 0);
-            const pilotNotDefeated = data.pilots.map(p => p.not_defeated_flights || 0);
+            const pilotPorazheno = data.pilots.map(p => p.porazheno || 0);
             pilotsChart = new Chart(pilotsCtx, {
                 type: 'bar',
                 data: {
                     labels: pilotNames,
                     datasets: [
                         {
-                            label: 'Уничтожено',
-                            data: pilotDestroyed,
-                            backgroundColor: 'rgba(244, 67, 54, 0.8)',
-                            borderColor: 'rgba(244, 67, 54, 1)',
-                            borderWidth: 1
-                        },
-                        {
                             label: 'Поражено',
-                            data: pilotDefeated,
-                            backgroundColor: 'rgba(255, 159, 64, 0.8)',
-                            borderColor: 'rgba(255, 159, 64, 1)',
+                            data: pilotPorazheno,
+                            backgroundColor: 'rgba(76, 175, 80, 0.8)',
+                            borderColor: 'rgba(76, 175, 80, 1)',
                             borderWidth: 1
                         },
-                        {
-                            label: 'Всего',
-                            data: pilotNotDefeated,
-                            backgroundColor: 'rgba(54, 162, 235, 0.8)',
-                            borderColor: 'rgba(54, 162, 235, 1)',
-                            borderWidth: 1
-                        }
                     ]
                 },
                 options: {
@@ -1491,7 +1475,7 @@
             // 5. График "Уничтоженные цели" (по аналогии с расходом пилотов)
             const targetsCtx = document.getElementById('targetsChart').getContext('2d');
             const targetNames = data.targets ? data.targets.map(t => t.target || 'Не указана') : [];
-            const targetCounts = data.targets ? data.targets.map(t => t.destroyed_count || 0) : [];
+            const targetCounts = data.targets ? data.targets.map(t => t.success_count || 0) : [];
 
             // Цвета для столбцов (используем те же цвета)
             const targetBackgroundColors = [
@@ -1506,7 +1490,7 @@
                 data: {
                     labels: targetNames,
                     datasets: [{
-                        label: 'Количество уничтожений',
+                        label: 'Успешных применений',
                         data: targetCounts,
                         backgroundColor: targetBackgroundColors.slice(0, targetNames.length),
                         borderWidth: 1
@@ -1561,15 +1545,12 @@
             // 6. График результатов вылетов (обновлен)
             const resultsCtx = document.getElementById('resultsChart').getContext('2d');
             // Используем явно определенные ключи из API
-            const resultLabels = ['destroyed', 'defeated', 'not defeated'];
             const resultValues = [
-                data.results_breakdown['destroyed'] || 0,
-                data.results_breakdown['defeated'] || 0,
-                data.results_breakdown['not defeated'] || 0
+                data.results_breakdown.porazheno || 0,
+                data.results_breakdown.not_defeated || 0
             ];
-            const readableLabels = ['Уничтожен', 'Поражен', 'Не поражен'];
-            // Назначаем цвета: Уничтожен (лучший) - Зеленый, Поражен - Желтый, Не поражен - Красный
-            const backgroundColorsResults = ['#4caf50', '#ffeb3b', '#f44336'];
+            const readableLabels = ['Поражено', 'Не поражено'];
+            const backgroundColorsResults = ['#4caf50', '#f44336'];
             resultsChart = new Chart(resultsCtx, {
                 type: 'doughnut',
                 data: {
@@ -1714,10 +1695,7 @@
                         </span>
                     </td>
                     <td>${pilot.total_flights}</td>
-                    <td>${pilot.destroyed_flights || 0}</td>
-                    <td class="${pilot.destruction_rate_percent >= 10 ? 'text-success' : pilot.destruction_rate_percent >= 5 ? 'text-warning' : 'text-danger'}">
-                        ${pilot.destruction_rate_percent}%
-                    </td>
+                    <td>${pilot.porazheno || 0}</td>
                     <td class="${pilot.success_rate_percent >= 50 ? 'text-success' : pilot.success_rate_percent >= 30 ? 'text-warning' : 'text-danger'}">
                         ${pilot.success_rate_percent || 0}%
                     </td>
@@ -1732,10 +1710,7 @@
                 row.innerHTML = `
                     <td>${drone.drone}</td>
                     <td>${drone.total_flights}</td>
-                    <td>${drone.destroyed_flights || 0}</td>
-                    <td class="${drone.destruction_rate_percent >= 10 ? 'text-success' : drone.destruction_rate_percent >= 5 ? 'text-warning' : 'text-danger'}">
-                        ${drone.destruction_rate_percent}%
-                    </td>
+                    <td>${drone.porazheno || 0}</td>
                     <td class="${drone.success_rate_percent >= 50 ? 'text-success' : drone.success_rate_percent >= 30 ? 'text-warning' : 'text-danger'}">
                         ${drone.success_rate_percent || 0}%
                     </td>
@@ -1776,7 +1751,7 @@
                                     <td>${escapeHtml(targetData.target || 'Не указана')}</td>
                                     <td class="text-center" style="font-weight: 600;">
                                         <span style="color: #4caf50; font-size: 16px;">
-                                            ${targetData.destroyed_count}
+                                            ${targetData.success_count}
                                         </span>
                                     </td>
                                 `;
@@ -1946,6 +1921,16 @@
             }
         }
 
+
+        function getSuccessCategory(flight) {
+            const raw = (flight.result_raw || '').toLowerCase().trim();
+            if (!raw) return null;
+            if (raw.includes('уничтож') || raw.includes('не п')) return null;
+            if (raw.includes('доставк')) return null;
+            if (raw.includes('пораж') || raw.includes('подавл')) return 'porazheno';
+            return null;
+        }
+
         function renderPilotDetail(data) {
             // Сохраняем данные пилота в глобальную переменную для использования в других функциях
             pilotDetailData = data;
@@ -1962,17 +1947,9 @@
                         <div class="pilot-stat-label">Всего вылетов</div>
                         <div class="pilot-stat-value">${stats.total_flights}</div>
                     </div>
-                    <div class="pilot-stat-card">
-                        <div class="pilot-stat-label">Уничтожено</div>
-                        <div class="pilot-stat-value" style="color: #4caf50;">${stats.destroyed_flights}</div>
-                    </div>
-                    <div class="pilot-stat-card">
+                                        <div class="pilot-stat-card">
                         <div class="pilot-stat-label">Поражено</div>
-                        <div class="pilot-stat-value" style="color: #ff9800;">${stats.defeated_flights}</div>
-                    </div>
-                    <div class="pilot-stat-card">
-                        <div class="pilot-stat-label">% Уничтожения</div>
-                        <div class="pilot-stat-value" style="color: #bb86fc;">${stats.destruction_rate}%</div>
+                        <div class="pilot-stat-value" style="color: #4caf50;">${stats.porazheno_flights || 0}</div>
                     </div>
                     <div class="pilot-stat-card">
                         <div class="pilot-stat-label">% Успеха</div>
@@ -2023,11 +2000,9 @@
                     <div class="target-header">
                         <div class="target-name">${target.target}</div>
                         <div class="target-stats">
-                            <span style="color: #4caf50;">Уничтожено: ${target.destroyed}</span>
-                            <span style="color: #ff9800;">Поражено: ${target.defeated}</span>
-                            <span style="color: #aaa;">Не поражено: ${target.not_defeated}</span>
+                            <span style="color: #4caf50;">Поражено: ${target.porazheno || 0}</span>
                             <span style="color: #bb86fc;">Всего: ${target.total}</span>
-                            <span style="color: #2196f3;">% Уничтожения: ${target.destruction_rate}%</span>
+                            <span style="color: #2196f3;">% Успеха: ${target.success_rate || 0}%</span>
                         </div>
                     </div>
                 `;
@@ -2200,9 +2175,7 @@
             }
             
             const dates = dailyTrend.map(d => d.date);
-            const destroyed = dailyTrend.map(d => d.destroyed_flights || 0);
-            const defeated = dailyTrend.map(d => d.defeated_flights || 0);
-            const notDefeated = dailyTrend.map(d => d.not_defeated_flights || 0);
+            const porazheno = dailyTrend.map(d => d.porazheno_flights || 0);
             const total = dailyTrend.map(d => d.total_flights || 0);
             
             pilotDetailChart = new Chart(ctx, {
@@ -2220,32 +2193,14 @@
                             tension: 0.4
                         },
                         {
-                            label: 'Уничтожено',
-                            data: destroyed,
+                            label: 'Поражено',
+                            data: porazheno,
                             borderColor: '#4caf50',
                             backgroundColor: 'rgba(76, 175, 80, 0.1)',
                             borderWidth: 2,
                             fill: true,
                             tension: 0.4
                         },
-                        {
-                            label: 'Поражено',
-                            data: defeated,
-                            borderColor: '#ff9800',
-                            backgroundColor: 'rgba(255, 152, 0, 0.1)',
-                            borderWidth: 2,
-                            fill: true,
-                            tension: 0.4
-                        },
-                        {
-                            label: 'Не поражено',
-                            data: notDefeated,
-                            borderColor: '#f44336',
-                            backgroundColor: 'rgba(244, 67, 54, 0.1)',
-                            borderWidth: 2,
-                            fill: true,
-                            tension: 0.4
-                        }
                     ]
                 },
                 options: {

@@ -3,6 +3,7 @@
     <div class="logo">Аэрофлот</div>
     <div class="nav-links">
         <a href="/" class="{% if request.resolver_match.url_name == 'map' %}active{% endif %}">Карта</a>
+        <a href="/dashboard/" class="{% if request.resolver_match.url_name == 'dashboard-page' %}active{% endif %}">Дашборд</a>
         <a href="/statistics/" class="{% if request.resolver_match.url_name == 'flights' %}active{% endif %}">Статистика</a>
         <a href="/schedule/" class="{% if request.resolver_match.url_name == 'flights' %}active{% endif %}">Расписание</a>
         <a href="/rating/" class="{% if request.resolver_match.url_name == 'rating' %}active{% endif %}">Рейтинг</a>

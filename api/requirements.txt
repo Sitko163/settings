@@ -21,3 +21,10 @@ Pillow==10.2.0
 python-keycloak==3.3.0
 django-redis==5.4.0
 redis==5.0.1
+# Telegram-бот (run_telegram_bot)
+aiogram~=3.22.0
+APScheduler~=3.11.0
+python-decouple~=3.8
+asyncpg~=0.30.0
+asyncpg_lite
+PyYAML~=6.0.2

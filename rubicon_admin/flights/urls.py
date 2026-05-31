@@ -1,10 +1,26 @@
 from django.urls import path
 from flights import views
 from django.contrib.auth import views as auth_views
-from flights.api import flights_total, statistics, schedule, rating, forced_cache_flights, pilot_detail, reports, pilot_export, filters, target_rating
+from flights.api import (
+    flights_total,
+    statistics,
+    schedule,
+    rating,
+    forced_cache_flights,
+    pilot_detail,
+    reports,
+    pilot_export,
+    filters,
+    target_rating,
+    live_dashboard,
+    live_flight_events,
+    dashboard_alerts,
+    telegram_report_events,
+)
 
 urlpatterns = [
     path('', views.map_view, name='map'),           # главная страница с картой
+    path('dashboard/', views.dashboard_view, name='dashboard-page'),
     path('statistics/', views.statistics_view, name='statistics-page'),
     path('schedule/', views.schedule_view, name='schedule-page'),
     path('rating/', views.rating_view, name='schedule-page'),
@@ -13,6 +29,10 @@ urlpatterns = [
     path('api/flights/', flights_total.FlightsListView.as_view(), name='flights-list'),  # API для полетов
     path('api/force_cache_flights/', forced_cache_flights.FlightsListViewWithForcedCache.as_view(), name='cache_flights'),  # API для полетов
     path('api/statistics/', statistics.StatisticsView.as_view(), name='statistics'), # Добавляем новый endpoint
+    path('api/live_dashboard/', live_dashboard.LiveDashboardAPIView.as_view(), name='live-dashboard'),
+    path('api/live_flight/event/', live_flight_events.LiveFlightEventAPIView.as_view(), name='live-flight-event'),
+    path('api/dashboard_alert/event/', dashboard_alerts.DashboardAlertAPIView.as_view(), name='dashboard-alert-event'),
+    path('api/telegram_report/event/', telegram_report_events.TelegramReportEventAPIView.as_view(), name='telegram-report-event'),
     path('api/pilot_detail/', pilot_detail.PilotDetailView.as_view(), name='pilot-detail'),
     path('api/pilot_export/excel/', pilot_export.PilotExportExcelView.as_view(), name='pilot-export-excel'),
     path('api/filters/', filters.FiltersDataView.as_view(), name='filters-data'),

@@ -17,13 +17,28 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv('SECRET_KEY', 'secret_key')
 YANDEX_API_KEY = os.getenv('YANDEX_API_KEY', 'yandex_secret_key')
 TOKEN = os.getenv('TOKEN', 'token')
+LIVE_FLIGHT_BOT_SECRET = os.getenv('LIVE_FLIGHT_BOT_SECRET', '')
+TELEGRAM_ALERTS_CHAT_ID = int(
+    os.getenv('TELEGRAM_ALERTS_CHAT_ID')
+    or os.getenv('TELEGRAM_LIVE_FLIGHT_CHAT_ID', '-1003960872491')
+)
+TELEGRAM_ALERTS_TOPIC_ID = int(os.getenv('TELEGRAM_ALERTS_TOPIC_ID', '2408'))
+TELEGRAM_REPORTS_CHAT_ID = int(
+    os.getenv('TELEGRAM_REPORTS_CHAT_ID')
+    or os.getenv('TELEGRAM_LIVE_FLIGHT_CHAT_ID', '-1003960872491')
+)
+TELEGRAM_REPORTS_TOPIC_ID = int(os.getenv('TELEGRAM_REPORTS_TOPIC_ID', '2406'))
+DASHBOARD_WEATHER_REGIONS = os.getenv('DASHBOARD_WEATHER_REGIONS', '')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', False) == 'True'
 
 # CSRF настройки
-CSRF_COOKIE_SECURE = True
-CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', 'https://himchistkacovrov.ru,https://aeroflot-pvz.ru,https://www.aeroflot-pvz.ru').split(',')
+CSRF_COOKIE_SECURE = os.getenv('CSRF_COOKIE_SECURE', 'True').lower() in ('true', '1', 'yes')
+CSRF_TRUSTED_ORIGINS = os.getenv(
+    'CSRF_TRUSTED_ORIGINS',
+    'https://himchistkacovrov.ru,https://aeroflot-pvz.ru,https://www.aeroflot-pvz.ru',
+).split(',')
 
 CSP_DEFAULT_SRC = ("'self'",)
 CSP_SCRIPT_SRC = ("'self'", "'unsafe-inline'")
@@ -33,7 +48,7 @@ SECURE_SSL_REDIRECT = False
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # Cookies
-SESSION_COOKIE_SECURE = True
+SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'True').lower() in ('true', '1', 'yes')
 SESSION_COOKIE_HTTPONLY = True
 
 # HSTS
@@ -54,7 +69,9 @@ _default_allowed_hosts = ['localhost', '127.0.0.1', 'aeroflot-pvz.ru', 'www.aero
 _allowed_hosts_from_env = os.getenv('DJANGO_ALLOWED_HOSTS', '').split()
 if _allowed_hosts_from_env and _allowed_hosts_from_env != ['']:
     # Если переменная окружения установлена, используем её и добавляем обязательные домены
-    ALLOWED_HOSTS = list(set(_allowed_hosts_from_env + ['aeroflot-pvz.ru', 'www.aeroflot-pvz.ru']))
+    ALLOWED_HOSTS = list(set(_allowed_hosts_from_env + [
+        'aeroflot-pvz.ru', 'www.aeroflot-pvz.ru', 'rubicon-api',
+    ]))
 else:
     # Иначе используем значения по умолчанию
     ALLOWED_HOSTS = _default_allowed_hosts

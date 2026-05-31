@@ -33,18 +33,23 @@ class FlightsListView(APIView):
             result = request.GET.get('result')
             target = request.GET.get('target')
             
-            # По умолчанию показываем только уничтоженные цели, если нет фильтров
-            if not result and not date_from and not date_to and not pilot_name and not target:
-                result = 'destroyed'  # Используем строку напрямую
-                logger.info("Фильтры не установлены, показываем только уничтоженные цели по умолчанию")
-            
+            # По умолчанию на карте — успешные вылеты: уничтожено + поражено (и аналоги из Excel)
+            map_success_only = (
+                not result and not date_from and not date_to and not pilot_name and not target
+            )
+            if map_success_only:
+                logger.info(
+                    "Фильтры не установлены, показываем успешные результаты: "
+                    "уничтожено, поражено, доставка, успех"
+                )
+
             # Создаем ключ кэша на основе всех параметров запроса
             cache_key_parts = [
-                'flights_total',
+                'flights_total_v3',
                 date_from or '',
                 date_to or '',
                 pilot_name or '',
-                result or '',
+                result or ('map_success' if map_success_only else ''),
                 target or ''
             ]
             cache_key = 'flights_total:' + hashlib.md5('|'.join(cache_key_parts).encode()).hexdigest()
@@ -87,16 +92,21 @@ class FlightsListView(APIView):
                 flights_with_coords = flights_with_coords.filter(flight_date__lte=date_to)
             if pilot_name:
                 flights_with_coords = flights_with_coords.filter(pilot__callname__icontains=pilot_name)
-            if result:
+            if map_success_only:
+                flights_with_coords = flights_with_coords.filter(
+                    result__in=FlightResultTypes.map_success_values()
+                )
+            elif result:
                 flights_with_coords = flights_with_coords.filter(result=result)
             if target:
                 flights_with_coords = flights_with_coords.filter(target__icontains=target)
             
             # Обрабатываем записи напрямую через iterator, без промежуточных преобразований
             logger.info(f"Обрабатываем записи напрямую через iterator...")
-            flights_data = []
+            flights_by_key = {}
             valid_count = 0
             skipped_count = 0
+            deduped_count = 0
             processed_count = 0
             
             # Ограничиваем количество обрабатываемых записей для производительности
@@ -150,14 +160,29 @@ class FlightsListView(APIView):
                         'comment': flight.comment,
                         'objective': flight.objective
                     }
-                    flights_data.append(flight_data)
-                    valid_count += 1
+                    dedupe_key = FlightResultTypes.map_dedupe_key(flight)
+                    existing = flights_by_key.get(dedupe_key)
+                    if existing is None:
+                        flights_by_key[dedupe_key] = flight_data
+                        valid_count += 1
+                    elif FlightResultTypes.result_priority(flight.result) > FlightResultTypes.result_priority(
+                        existing['result']
+                    ):
+                        flights_by_key[dedupe_key] = flight_data
+                        deduped_count += 1
+                    else:
+                        deduped_count += 1
                 except Exception as flight_error:
                     logger.error(f"Ошибка обработки полета {flight.id}: {flight_error}")
                     skipped_count += 1
                     continue
             
-            logger.info(f"Обработано всего: {processed_count} полетов, валидных={valid_count}, пропущенных={skipped_count}")
+            flights_data = list(flights_by_key.values())
+            logger.info(
+                f"Обработано всего: {processed_count} полетов, "
+                f"уникальных на карте={valid_count}, дублей отброшено={deduped_count}, "
+                f"пропущенных={skipped_count}"
+            )
             logger.info(f"Возвращаем {len(flights_data)} записей в ответе API")
             if flights_data:
                 logger.info(f"Пример первой записи: id={flights_data[0].get('id')}, coordinates_info={flights_data[0].get('coordinates_info')}")
